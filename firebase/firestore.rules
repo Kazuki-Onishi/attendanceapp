@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function roleDocPath(uid, storeId) {
+      return /databases/$(database)/documents/userStoreRoles/$(uid + '_' + storeId);
+    }
+
+    function roleOf(uid, storeId) {
+      let path = roleDocPath(uid, storeId);
+      return exists(path) ? get(path).data.role : null;
+    }
+
+    function rankOf(role) {
+      return role == 'owner' ? 6 : role == 'admin' ? 5 : role == 'manager' ? 4 : role == 'senior' ? 3 : role == 'employee' ? 2 : role == 'staff' ? 1 : 0;
+    }
+
+    function hasRank(uid, storeId, minRank) {
+      return rankOf(roleOf(uid, storeId)) >= minRank;
+    }
+
+    function isKiosk(uid, storeId) {
+      let role = roleOf(uid, storeId);
+      return role == 'kiosk' || hasRank(uid, storeId, 4);
+    }
+
+    function isManagerOrHigher(uid, storeId) {
+      return hasRank(uid, storeId, 4);
+    }
+
+    function canApprove(type, uid, storeId) {
+      let rank = rankOf(roleOf(uid, storeId));
+      return (type == 'employment_change' && rank >= 5) ||
+        ((type == 'allowance_add' || type == 'allowance_update' || type == 'allowance_end' || type == 'commute_update' || type == 'shiftCorrection' || type == 'receipt' || type == 'storeMembership') && rank >= 4);
+    }
+
+    function canRequest(type, uid, storeId) {
+      let rank = rankOf(roleOf(uid, storeId));
+      return (type == 'employment_change' && rank >= 3) ||
+        ((type == 'allowance_add' || type == 'allowance_update' || type == 'allowance_end' || type == 'commute_update') && rank >= 3) ||
+        type == 'storeMembership' || type == 'receipt' || type == 'shiftCorrection';
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /stores/{storeId} {
+      allow read: if signedIn();
+    }
+
+    match /userStoreRoles/{roleId} {
+      allow read: if signedIn() && resource != null && resource.data.userId == request.auth.uid;
+    }
+
+    match /attendances/{attendanceId} {
+      allow create: if signedIn() &&
+        (
+          request.resource.data.userId == request.auth.uid ||
+          (isKiosk(request.auth.uid, request.resource.data.storeId))
+        );
+
+      allow read: if signedIn() && resource != null && resource.data.userId == request.auth.uid;
+
+      allow update: if signedIn() && resource != null &&
+        (
+          (resource.data.userId == request.auth.uid) ||
+          (isKiosk(request.auth.uid, resource.data.storeId))
+        ) && request.resource.data.storeId == resource.data.storeId;
+
+      allow delete: if false;
+    }
+
+    match /approvals/{approvalId} {
+      allow read: if signedIn() && resource != null && resource.data.storeId is string && hasRank(request.auth.uid, resource.data.storeId, 4);
+      allow create: if signedIn() && request.resource.data.storeId is string && canRequest(request.resource.data.type, request.auth.uid, request.resource.data.storeId);
+      allow update: if signedIn() && resource != null && resource.data.storeId is string && canApprove(resource.data.type, request.auth.uid, resource.data.storeId) &&
+        request.resource.data.storeId == resource.data.storeId &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'decidedAt', 'decidedBy', 'comment']);
+      allow delete: if false;
+    }
+
+    match /storeJoinRequests/{requestId} {
+      allow create: if signedIn() &&
+        request.resource.data.keys().hasOnly(['userId', 'storeId', 'note', 'source', 'status', 'createdAt', 'updatedAt']) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.source == 'self' &&
+        request.resource.data.status == 'pending';
+
+      allow read: if signedIn() && resource != null && (
+        resource.data.userId == request.auth.uid ||
+        (resource.data.storeId is string && isManagerOrHigher(request.auth.uid, resource.data.storeId))
+      );
+
+      allow update: if signedIn() && resource != null && request.resource.data.keys().hasOnly(['userId', 'storeId', 'note', 'source', 'status', 'createdAt', 'updatedAt']) &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.storeId == resource.data.storeId &&
+        request.resource.data.source == resource.data.source &&
+        request.resource.data.note == resource.data.note &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        (
+          (resource.data.status == 'pending' && request.resource.data.status == 'canceled' && request.auth.uid == resource.data.userId) ||
+          (resource.data.status == 'pending' && (request.resource.data.status == 'approved' || request.resource.data.status == 'rejected') && resource.data.storeId is string && canApprove('storeMembership', request.auth.uid, resource.data.storeId))
+        );
+
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
