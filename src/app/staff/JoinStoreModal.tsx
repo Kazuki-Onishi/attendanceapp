@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -200,9 +200,9 @@ const JoinStoreModal: React.FC<JoinStoreModalProps> = ({ visible, onClose }) => 
     } catch (error) {
       let message: string;
       if (error instanceof Error) {
-        if (error.message == 'Invalid store authentication code.') {
+        if (error.message === 'Invalid store authentication code.') {
           message = formLabels.authCodeInvalid ?? error.message;
-        } else if (error.message == 'Store join authentication is not configured.') {
+        } else if (error.message === 'Store join authentication is not configured.') {
           message =
             formLabels.authCodeNotConfigured ?? 'Store join authentication is not configured.';
         } else {

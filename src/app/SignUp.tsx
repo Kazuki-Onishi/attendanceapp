@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import {
@@ -10,8 +10,9 @@ import {
   View,
 } from 'react-native';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 
-import { auth } from '@/lib/firebase';
+import { auth, firestore } from '@/lib/firebase';
 import type { RootStackParamList } from '@/navigation/RootStack';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { setError, setStatus } from '@/store/slices/authSlice';
@@ -59,6 +60,22 @@ const SignUp: React.FC = () => {
       if (trimmedDisplayName) {
         await updateProfile(credential.user, { displayName: trimmedDisplayName });
       }
+
+      const db = firestore();
+      const now = serverTimestamp();
+      const profileName = trimmedDisplayName || credential.user.displayName || null;
+      await setDoc(
+        doc(db, 'users', credential.user.uid),
+        {
+          name: profileName,
+          displayName: profileName,
+          email: credential.user.email ?? trimmedEmail,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+
       dispatch(setStatus('authenticated'));
       navigation.goBack();
     } catch (err) {
@@ -134,7 +151,6 @@ const SignUp: React.FC = () => {
     </View>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,

@@ -223,6 +223,7 @@ const CreateStoreModal: React.FC<CreateStoreModalProps> = ({ visible, onClose, a
     joinCodeConfirm,
     nameOfficial,
     nameShort,
+    onCreated,
     storeId,
     storePassword,
     storePasswordConfirm,

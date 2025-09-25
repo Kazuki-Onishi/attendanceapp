@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { signOut } from 'firebase/auth';
 
 import labels from '@/i18n/ja.json';
@@ -44,6 +44,7 @@ const StaffSettingsScreen: React.FC<StaffSettingsScreenProps> = ({ onRequestJoin
   const securityLabels = useMemo(() => settingsLabels.security ?? {}, [settingsLabels]);
   const membershipLabels = useMemo(() => settingsLabels.membership ?? {}, [settingsLabels]);
   const shareLabels = useMemo(() => membershipLabels.share ?? {}, [membershipLabels]);
+
   const roleLabels = useMemo(() => membershipLabels.roles ?? {}, [membershipLabels]);
   const viewSwitchLabels = useMemo(() => settingsLabels.viewSwitch ?? {}, [settingsLabels]);
 
@@ -54,6 +55,29 @@ const StaffSettingsScreen: React.FC<StaffSettingsScreenProps> = ({ onRequestJoin
     [activeRoles],
   );
   const palette = useStorePalette(paletteStoreIds);
+  const { preferences, loading: prefsLoading, error: prefsError, toggleShare, pending } =
+    useStoreVisibilityPreferences({ userId: user?.uid ?? null });
+
+  const confirmShareChange = useCallback(
+    (storeId: string, nextValue: boolean) => {
+      if (pending[storeId]) {
+        return;
+      }
+
+      const title = shareLabels.confirmTitle ?? 'Update sharing';
+      const message = nextValue
+        ? shareLabels.confirmEnable ?? 'Make your profile visible to this store?'
+        : shareLabels.confirmDisable ?? 'Hide your profile from this store?';
+      const confirmLabel = shareLabels.confirm ?? 'Update';
+      const cancelLabel = shareLabels.cancel ?? 'Cancel';
+
+      Alert.alert(title, message, [
+        { text: cancelLabel, style: 'cancel' },
+        { text: confirmLabel, onPress: () => toggleShare(storeId, nextValue) },
+      ]);
+    },
+    [pending, shareLabels, toggleShare],
+  );
 
   const storeById = useMemo(() => {
     const map = new Map<string, (typeof availableStores)[number]>();
@@ -62,9 +86,6 @@ const StaffSettingsScreen: React.FC<StaffSettingsScreenProps> = ({ onRequestJoin
     });
     return map;
   }, [availableStores]);
-
-  const { preferences, loading: prefsLoading, error: prefsError, toggleShare, pending } =
-    useStoreVisibilityPreferences({ userId: user?.uid ?? null });
 
   const membershipItems = useMemo(() => {
     return activeRoles
@@ -198,7 +219,7 @@ const StaffSettingsScreen: React.FC<StaffSettingsScreenProps> = ({ onRequestJoin
                       <Switch
                         value={shareEnabled}
                         disabled={toggleDisabled}
-                        onValueChange={(next) => toggleShare(item.storeId, next)}
+                        onValueChange={(next) => confirmShareChange(item.storeId, next)}
                         trackColor={{ false: '#475569', true: '#22c55e' }}
                         thumbColor={shareEnabled ? '#f8fafc' : '#e2e8f0'}
                       />

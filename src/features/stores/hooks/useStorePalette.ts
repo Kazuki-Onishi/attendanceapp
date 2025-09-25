@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 import { firestore } from '@/lib/firebase';
@@ -12,8 +12,11 @@ export type StorePaletteEntry = {
 const normaliseIds = (ids: string[]): string[] => Array.from(new Set(ids.filter(Boolean))).sort();
 
 export function useStorePalette(storeIds: string[]): Record<string, StorePaletteEntry> {
-  const storeIdsKey = useMemo(() => storeIds.join('|'), [storeIds]);
-  const deduped = useMemo(() => normaliseIds(storeIds), [storeIdsKey]);
+  const storeIdsKey = useMemo(() => normaliseIds(storeIds).join('|'), [storeIds]);
+  const deduped = useMemo(
+    () => (storeIdsKey.length > 0 ? storeIdsKey.split('|') : []),
+    [storeIdsKey],
+  );
   const [palette, setPalette] = useState<Record<string, StorePaletteEntry>>({});
 
   useEffect(() => {
@@ -56,3 +59,4 @@ export function useStorePalette(storeIds: string[]): Record<string, StorePalette
 
   return useMemo(() => palette, [palette]);
 }
+

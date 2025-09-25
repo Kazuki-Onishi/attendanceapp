@@ -1,11 +1,13 @@
-﻿import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -132,31 +134,71 @@ const ApprovalsScreen: React.FC = () => {
     [approvals, selectedIds],
   );
 
-  const hasMixedBatchSelection = useCallback((items: ApprovalSummary[]) => {
-    let activeBatchId: string | null = null;
-    let hasMixed = false;
-    let hasBatched = false;
-    let hasUnbatched = false;
+
+  const evaluateSelectionIssues = useCallback((items: ApprovalSummary[]) => {
+    if (items.length === 0) {
+      return {
+        hasIssues: false,
+        mismatchCount: 0,
+        reasons: [] as Array<'batch' | 'type' | 'store'>,
+      };
+    }
+    const batchIds = new Set<string | null>();
+    const typeIds = new Set<ApprovalType>();
+    const storeIds = new Set<string | null>();
     items.forEach((item) => {
-      const batchId = typeof item.batchContext?.id === 'string' ? item.batchContext.id : null;
-      if (batchId) {
-        hasBatched = true;
-        if (!activeBatchId) {
-          activeBatchId = batchId;
-        } else if (activeBatchId !== batchId) {
-          hasMixed = true;
-        }
-      } else {
-        hasUnbatched = true;
-      }
+      batchIds.add(typeof item.batchContext?.id === 'string' ? item.batchContext.id : null);
+      typeIds.add(item.type);
+      storeIds.add(item.storeId ?? null);
     });
-    return hasMixed || (hasBatched && hasUnbatched);
+    const reasons: Array<'batch' | 'type' | 'store'> = [];
+    if (batchIds.size > 1) {
+      reasons.push('batch');
+    }
+    if (typeIds.size > 1) {
+      reasons.push('type');
+    }
+    if (storeIds.size > 1) {
+      reasons.push('store');
+    }
+    const hasIssues = reasons.length > 0;
+    return {
+      hasIssues,
+      mismatchCount: hasIssues ? items.length : 0,
+      reasons,
+    };
   }, []);
 
-  const hasMixedBatch = useMemo(
-    () => hasMixedBatchSelection(selectedApprovals),
-    [selectedApprovals, hasMixedBatchSelection],
+  const selectionIssues = useMemo(
+    () => evaluateSelectionIssues(selectedApprovals),
+    [evaluateSelectionIssues, selectedApprovals],
   );
+
+  const reasonLabelMap = useMemo(
+    () => ({
+      batch: approvalsLabels.selectionReasonBatch ?? 'Batch',
+      type: approvalsLabels.selectionReasonType ?? 'Type',
+      store: approvalsLabels.selectionReasonStore ?? 'Store',
+    }),
+    [approvalsLabels],
+  );
+
+  const formatReasonText = useCallback(
+    (reasons: Array<'batch' | 'type' | 'store'>) => {
+      if (!reasons.length) {
+        return reasonLabelMap.batch;
+      }
+      return reasons.map((reason) => reasonLabelMap[reason]).join(' / ');
+    },
+    [reasonLabelMap],
+  );
+
+  const selectionReasonText = useMemo(
+    () => (selectionIssues.hasIssues ? formatReasonText(selectionIssues.reasons) : ''),
+    [selectionIssues, formatReasonText],
+  );
+
+  const toastLabels = useMemo(() => approvalsLabels.toast ?? {}, [approvalsLabels]);
 
   const {
     staleRole,
@@ -191,7 +233,7 @@ const ApprovalsScreen: React.FC = () => {
     [staleRole, staleAllowance, missingRole, allowanceNameRequired, missingAllowance, genericUpdateError],
   );
 
-  // ▼▼ 修正：\r\n を含んだ壊れたブロックを置き換え ▼▼
+  // ���� �C���F\r\n ���܂񂾉�ꂽ�u���b�N��u������ ����
     const roles = useMemo(() => auth.roles ?? [], [auth.roles]);
 
   const roleMap = useMemo(() => {
@@ -252,7 +294,23 @@ const ApprovalsScreen: React.FC = () => {
 
   const selectedUnauthorizedCount = selectedUnauthorized.length;
   const disableBulkActions =
-    selectedIds.length === 0 || bulkWorking || selectedUnauthorizedCount > 0 || hasMixedBatch;
+    selectedIds.length === 0 || bulkWorking || selectedUnauthorizedCount > 0 || selectionIssues.hasIssues;
+
+  const showBulkResultToast = useCallback(
+    (action: 'approve' | 'reject', count: number) => {
+      const template =
+        action === 'approve'
+          ? toastLabels.approved ?? '{count} approvals completed.'
+          : toastLabels.rejected ?? '{count} approvals reverted.';
+      const message = template.replace('{count}', String(count));
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.SHORT);
+      } else {
+        Alert.alert(toastLabels.title ?? 'Bulk action', message);
+      }
+    },
+    [toastLabels],
+  );
 
   const executeAction = useCallback(
     async (action: 'approve' | 'reject', comment: string, overrides?: ApprovalSummary[]) => {
@@ -264,12 +322,12 @@ const ApprovalsScreen: React.FC = () => {
       if (!targetApprovals.length) {
         return;
       }
-      if (hasMixedBatchSelection(targetApprovals)) {
-        Alert.alert(
-          approvalsLabels.mixedBatchTitle ?? 'Batch mismatch',
-          approvalsLabels.mixedBatchMessage ??
-            'Select approvals from the same batch to continue.',
-        );
+      const issues = evaluateSelectionIssues(targetApprovals);
+      if (issues.hasIssues) {
+        const reasonText = formatReasonText(issues.reasons);
+        const message = (approvalsLabels.mixedSelectionMessage ??
+          '{count} items cannot be processed ({reasons}). Select requests that share the same batch, type, and store.').replace('{count}', String(issues.mismatchCount)).replace('{reasons}', reasonText);
+        Alert.alert(approvalsLabels.mixedSelectionTitle ?? 'Selection mismatch', message);
         return;
       }
       setBulkWorking(true);
@@ -281,12 +339,11 @@ const ApprovalsScreen: React.FC = () => {
           await rejectMany({ approvalIds: targetIds, actorUserId, comment });
         }
         setSelectedIds([]);
+        showBulkResultToast(action, targetApprovals.length);
       } catch (err) {
-        // ▼▼ 修正：resolveErrorMessage を使ってローカライズされた文言に変換 ▼▼
         const rawMessage = err instanceof Error ? err.message : null;
         const message = resolveErrorMessage(rawMessage);
         Alert.alert(errorTitle ?? 'Error', message);
-        // ▲▲ 修正ここまで ▲▲
       } finally {
         setBulkWorking(false);
         setPendingApprovals([]);
@@ -296,8 +353,11 @@ const ApprovalsScreen: React.FC = () => {
       actorUserId,
       selectedApprovals,
       approvalsLabels,
-      hasMixedBatchSelection,
-      resolveErrorMessage, // 依存に追加
+      evaluateSelectionIssues,
+      formatReasonText,
+      resolveErrorMessage,
+      errorTitle,
+      showBulkResultToast,
     ],
   );
 
@@ -307,12 +367,12 @@ const ApprovalsScreen: React.FC = () => {
       if (!targetApprovals.length) {
         return;
       }
-      if (hasMixedBatchSelection(targetApprovals)) {
-        Alert.alert(
-          approvalsLabels.mixedBatchTitle ?? 'Batch mismatch',
-          approvalsLabels.mixedBatchMessage ??
-            'Select approvals from the same batch to continue.',
-        );
+      const issues = evaluateSelectionIssues(targetApprovals);
+      if (issues.hasIssues) {
+        const reasonText = formatReasonText(issues.reasons);
+        const message = (approvalsLabels.mixedSelectionMessage ??
+          '{count} items cannot be processed ({reasons}). Select requests that share the same batch, type, and store.').replace('{count}', String(issues.mismatchCount)).replace('{reasons}', reasonText);
+        Alert.alert(approvalsLabels.mixedSelectionTitle ?? 'Selection mismatch', message);
         return;
       }
       const unauthorized = unauthorizedForTargets(targetApprovals);
@@ -320,10 +380,7 @@ const ApprovalsScreen: React.FC = () => {
         Alert.alert(
           approvalsLabels.unauthorizedTitle ?? 'Not permitted',
           (approvalsLabels.unauthorizedMessage ??
-            'You cannot act on {count} selected items.').replace(
-            '{count}',
-            String(unauthorized.length),
-          ),
+            'You cannot act on {count} selected items.').replace('{count}', String(unauthorized.length)),
         );
         return;
       }
@@ -341,10 +398,11 @@ const ApprovalsScreen: React.FC = () => {
     },
     [
       selectedApprovals,
-      executeAction,
+      evaluateSelectionIssues,
+      formatReasonText,
       unauthorizedForTargets,
       approvalsLabels,
-      hasMixedBatchSelection,
+      executeAction,
     ],
   );
 
@@ -461,7 +519,7 @@ const ApprovalsScreen: React.FC = () => {
           style={[styles.checkbox, active && styles.checkboxActive]}
           onPress={() => toggleSelection(item.id)}
         >
-          {active ? <Text style={styles.checkboxLabel}>✓</Text> : null}
+          {active ? <Text style={styles.checkboxLabel}>?</Text> : null}
         </TouchableOpacity>
         <View style={styles.rowContent}>
           <Text style={styles.rowTitle}>{item.title}</Text>
@@ -533,10 +591,13 @@ const ApprovalsScreen: React.FC = () => {
           )}
         </Text>
       ) : null}
-      {hasMixedBatch ? (
+      {selectionIssues.hasIssues ? (
         <Text style={styles.footerWarning}>
-          {approvalsLabels.mixedBatchWarning ??
-            'Select approvals from the same batch before using bulk actions.'}
+          {(approvalsLabels.mixedSelectionFooter ??
+            '{count} items are from different batches/types/stores ({reasons}).').replace(
+            '{count}',
+            String(selectionIssues.mismatchCount),
+          ).replace('{reasons}', selectionReasonText || reasonLabelMap.batch)}
         </Text>
       ) : null}
 

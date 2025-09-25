@@ -44,6 +44,10 @@ service cloud.firestore {
         type == 'storeMembership' || type == 'receipt' || type == 'shiftCorrection';
     }
 
+    function canReadAllowance(storeId) {
+      return signedIn() && storeId is string && hasRank(request.auth.uid, storeId, 3);
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && request.auth.uid == userId;
     }
@@ -107,6 +111,16 @@ service cloud.firestore {
         );
 
       allow delete: if false;
+    }
+
+    match /allowanceMasters/{masterId} {
+      allow read: if resource != null && canReadAllowance(resource.data.storeId);
+      allow write: if false;
+    }
+
+    match /allowances/{allowanceId} {
+      allow read: if resource != null && canReadAllowance(resource.data.storeId);
+      allow write: if false;
     }
 
     match /{document=**} {

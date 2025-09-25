@@ -16,7 +16,9 @@ import labels from '@/i18n/ja.json';
 import { listStoreMembers, listStoresForUser, type Store, type StoreMember } from '@/features/stores/api';
 import { useAppSelector } from '@/store';
 import { rankOfRole } from '@/utils/roles';
-import StaffBulkActionModal, { type SelectedStaffTarget } from '@/app/admin/staff/StaffBulkActionModal';
+import StaffBulkActionModal from '@/app/admin/staff/StaffBulkActionModal';
+import type { SelectedStaffTarget } from '@/app/admin/staff/types';
+import StaffMemberDetailModal from '@/app/admin/staff/StaffMemberDetailModal';
 
 const AdminStaffScreen: React.FC = () => {
   const auth = useAppSelector((state) => state.auth);
@@ -31,6 +33,16 @@ const AdminStaffScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedRoleDocIds, setSelectedRoleDocIds] = useState<Set<string>>(new Set());
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailMember, setDetailMember] = useState<StoreMember | null>(null);
+
+  const handleOpenMemberDetail = useCallback((member: StoreMember) => {
+    setDetailMember(member);
+  }, []);
+
+  const handleCloseMemberDetail = useCallback(() => {
+    setDetailMember(null);
+  }, []);
+
 
   const adminLabels = (labels.admin ?? {}) as Record<string, any>;
   const bulkLabels = (adminLabels.bulk ?? {}) as Record<string, any>;
@@ -237,18 +249,25 @@ const AdminStaffScreen: React.FC = () => {
     const roleDocId = `${item.userId}_${item.storeId}`;
     const selected = selectedRoleDocIds.has(roleDocId);
     return (
-      <TouchableOpacity
-        style={[styles.memberRow, selected && styles.memberRowSelected]}
-        onPress={() => toggleSelect(roleDocId)}
-      >
-        <View style={[styles.checkbox, selected && styles.checkboxActive]}>
-          {selected ? <Text style={styles.checkboxLabel}>?</Text> : null}
-        </View>
-        <View style={styles.memberInfo}>
+      <View style={[styles.memberRow, selected && styles.memberRowSelected]}>
+        <TouchableOpacity
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: selected }}
+          style={[styles.checkbox, selected && styles.checkboxActive]}
+          onPress={() => toggleSelect(roleDocId)}
+        >
+          {selected ? <Text style={styles.checkboxLabel}>X</Text> : null}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.memberInfo}
+          onPress={() => handleOpenMemberDetail(item)}
+          onLongPress={() => toggleSelect(roleDocId)}
+          delayLongPress={250}
+        >
           <Text style={styles.memberName}>{item.displayName ?? item.email ?? item.userId}</Text>
           <Text style={styles.memberMeta}>{item.role}</Text>
-        </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -312,6 +331,12 @@ const AdminStaffScreen: React.FC = () => {
         requesterName={requesterName}
         onClose={handleModalClose}
         onSubmitted={handleModalSubmitted}
+      />
+
+      <StaffMemberDetailModal
+        visible={detailMember !== null}
+        member={detailMember}
+        onClose={handleCloseMemberDetail}
       />
     </View>
   );
